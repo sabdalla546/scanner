@@ -1,4 +1,11 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Tray,
+} = require("electron");
 const { exec } = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -21,6 +28,76 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 /** @type {http.Server | null} */
 let httpServer = null;
+
+/** @type {BrowserWindow | null} */
+let mainWindow = null;
+
+/** @type {Tray | null} */
+let tray = null;
+
+let isQuitting = false;
+
+const startHidden = process.argv.includes("--hidden");
+
+function configureAutoStart() {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  app.setLoginItemSettings({
+    openAtLogin: true,
+    path: process.execPath,
+    args: ["--hidden"],
+  });
+  console.log("Auto-start enabled for packaged app.");
+}
+
+function getTrayImage() {
+  const icoPath = path.join(__dirname, "build", "icon.ico");
+  if (fs.existsSync(icoPath)) {
+    return nativeImage.createFromPath(icoPath);
+  }
+
+  const fromExe = nativeImage.createFromPath(process.execPath);
+  if (!fromExe.isEmpty()) {
+    return fromExe;
+  }
+
+  return nativeImage.createEmpty();
+}
+
+function createTray() {
+  if (tray) {
+    return;
+  }
+
+  const icon = getTrayImage();
+  tray = new Tray(icon);
+  tray.setToolTip("Roses Scanner Agent");
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: "Show Scanner",
+      click: () => {
+        createWindow({ show: true });
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Quit",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  tray.on("click", () => {
+    createWindow({ show: true });
+  });
+}
 
 function getAllowedOrigins() {
   const set = new Set(DEFAULT_ALLOWED_ORIGINS);
@@ -231,18 +308,38 @@ function startScannerHttpServer() {
   });
 
   httpServer.listen(SCANNER_HTTP_PORT, "127.0.0.1", () => {
-    console.log(
-      `Scanner HTTP bridge running at http://127.0.0.1:${SCANNER_HTTP_PORT}`,
-    );
+    if (SCANNER_HTTP_PORT === 17855) {
+      console.log("Scanner HTTP bridge running at http://127.0.0.1:17855");
+    } else {
+      console.log(
+        `Scanner HTTP bridge running at http://127.0.0.1:${SCANNER_HTTP_PORT}`,
+      );
+    }
   });
 }
 
-function createWindow() {
+function createWindow(options = {}) {
+  const shouldShow = options.show !== false;
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (shouldShow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.setSkipTaskbar(false);
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    return mainWindow;
+  }
+
   const window = new BrowserWindow({
     width: 420,
     height: 320,
     resizable: false,
     autoHideMenuBar: true,
+    show: shouldShow,
+    skipTaskbar: !shouldShow,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -251,7 +348,25 @@ function createWindow() {
     },
   });
 
+  mainWindow = window;
+
+  window.on("closed", () => {
+    mainWindow = null;
+  });
+
+  window.on("close", (event) => {
+    if (isQuitting) {
+      return;
+    }
+    if (tray) {
+      event.preventDefault();
+      window.hide();
+    }
+  });
+
   window.loadFile(path.join(__dirname, "index.html"));
+
+  return window;
 }
 
 function ensureScanDirectory() {
@@ -387,27 +502,66 @@ async function scanContract(payload) {
 
 ipcMain.handle("scan-contract", async (_event, payload) => scanContract(payload));
 
-app.whenReady().then(() => {
-  ensureScanDirectory();
-  startScannerHttpServer();
-  createWindow();
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const existing =
+      mainWindow && !mainWindow.isDestroyed()
+        ? mainWindow
+        : BrowserWindow.getAllWindows()[0];
+
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) {
+        existing.restore();
+      }
+      existing.show();
+      existing.focus();
+    } else {
+      createWindow({ show: true });
     }
   });
-});
 
-app.on("before-quit", () => {
-  if (httpServer) {
-    httpServer.close();
-    httpServer = null;
-  }
-});
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+  app.on("before-quit", () => {
+    isQuitting = true;
+    if (tray) {
+      tray.destroy();
+      tray = null;
+    }
+    if (httpServer) {
+      httpServer.close();
+      httpServer = null;
+    }
+  });
+
+  app.whenReady().then(() => {
+    configureAutoStart();
+    ensureScanDirectory();
+
+    if (startHidden) {
+      console.log("Starting hidden because --hidden was provided.");
+    }
+
+    startScannerHttpServer();
+
+    createWindow({ show: !startHidden });
+
+    if (startHidden) {
+      createTray();
+    }
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow({ show: true });
+      }
+    });
+  });
+}

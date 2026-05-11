@@ -18,5 +18,9 @@ Thumbs.db
 # Electron / packaging output (common names)
 dist/
 out/
-build/
 release/
+
+# NSIS / electron-builder assets live in build/ — track icon + README, ignore other junk
+build/*
+!build/README.md
+!build/icon.ico
