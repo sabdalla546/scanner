@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Scanner</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 16px;
+      }
+
+      label,
+      input,
+      button {
+        display: block;
+        width: 100%;
+      }
+
+      input,
+      button {
+        box-sizing: border-box;
+        margin-top: 8px;
+        padding: 8px;
+      }
+
+      #status,
+      #result {
+        margin-top: 12px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Scanner</h1>
+
+    <label for="contractId">Contract ID</label>
+    <input id="contractId" type="text" placeholder="Enter contract ID" />
+
+    <button id="scanButton" type="button">Scan Contract</button>
+
+    <div id="status">Ready.</div>
+    <div id="result"></div>
+
+    <script>
+      const contractIdInput = document.getElementById("contractId");
+      const scanButton = document.getElementById("scanButton");
+      const statusEl = document.getElementById("status");
+      const resultEl = document.getElementById("result");
+
+      let latestScanResult = null;
+      window.latestScanResult = null;
+
+      async function handleScan() {
+        const contractId = contractIdInput.value.trim();
+
+        if (!contractId) {
+          latestScanResult = null;
+          window.latestScanResult = null;
+          statusEl.textContent = "Contract ID is required.";
+          resultEl.textContent = "";
+          contractIdInput.focus();
+          return;
+        }
+
+        scanButton.disabled = true;
+        statusEl.textContent = "Scanning...";
+        resultEl.textContent = "";
+
+        try {
+          const response = await window.scannerAPI.scanContract({ contractId });
+
+          if (!response || !response.success) {
+            latestScanResult = null;
+            window.latestScanResult = null;
+            statusEl.textContent = response?.error || "Scan failed.";
+            return;
+          }
+
+          latestScanResult = response;
+          window.latestScanResult = response;
+          statusEl.textContent = "Scan completed successfully.";
+          resultEl.textContent = `File: ${response.fileName}\nType: ${response.mimeType}`;
+        } catch (error) {
+          latestScanResult = null;
+          window.latestScanResult = null;
+          statusEl.textContent = error?.message || "Scan failed.";
+        } finally {
+          scanButton.disabled = false;
+        }
+      }
+
+      scanButton.addEventListener("click", handleScan);
+      contractIdInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          handleScan();
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "scanner-electron",
+  "version": "1.0.0",
+  "description": "Local Electron scanner app for NAPS2 PDF scanning.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [
+    "electron",
+    "scanner",
+    "naps2"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "electron": "^41.2.1"
+  }
+}
